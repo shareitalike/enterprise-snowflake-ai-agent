@@ -94,7 +94,7 @@ graph TD
     
     %% LLM Binding
     G -- "bind_tools()" --> J
-    G -- "bind_tools()" -.-> K
+    G -. "bind_tools()" .-> K
     
     J -- "Structured JSON Tool Call" --> G
     
