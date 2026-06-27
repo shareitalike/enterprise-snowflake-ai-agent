@@ -118,7 +118,7 @@ def governance_tool(object_name: str) -> str:
     
     # Tags
     tag_query = f"""
-        SELECT TAG_NAME, TAG_VALUE, OBJECT_NAME, OBJECT_TYPE, COLUMN_NAME
+        SELECT TAG_NAME, TAG_VALUE, OBJECT_NAME, OBJECT_DOMAIN, COLUMN_NAME
         FROM SNOWFLAKE.ACCOUNT_USAGE.TAG_REFERENCES
         WHERE OBJECT_NAME ILIKE '%{obj_clean}%'
         LIMIT 10

@@ -3,6 +3,10 @@ import snowflake.connector
 from snowflake.connector.errors import ProgrammingError
 import json
 from dotenv import load_dotenv
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import dsa
+from cryptography.hazmat.primitives import serialization
 
 load_dotenv()
 
@@ -28,8 +32,26 @@ class SnowflakeDB:
         if auth_method == "PASSWORD":
             conn_params["password"] = os.getenv("SNOWFLAKE_PASSWORD")
         elif auth_method == "KEY_PAIR":
-            # Future implementation: load private key bytes here
-            raise NotImplementedError("KEY_PAIR auth not yet fully implemented.")
+            private_key_path = os.getenv("SNOWFLAKE_PRIVATE_KEY_PATH")
+            private_key_passphrase = os.getenv("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE")
+
+            if not private_key_path or not os.path.exists(private_key_path):
+                raise ValueError(f"Private key file not found at: {private_key_path}")
+
+            with open(private_key_path, "rb") as key_file:
+                p_key = serialization.load_pem_private_key(
+                    key_file.read(),
+                    password=private_key_passphrase.encode() if private_key_passphrase else None,
+                    backend=default_backend()
+                )
+
+            pkb = p_key.private_bytes(
+                encoding=serialization.Encoding.DER,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            )
+            
+            conn_params["private_key"] = pkb
         
         return snowflake.connector.connect(**conn_params)
 
