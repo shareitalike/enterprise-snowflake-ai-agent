@@ -55,38 +55,43 @@ def execute_tools(state: AgentState):
     """Step 3 & 4: Retrieve evidence using tools."""
     last_message = state["messages"][-1].content
     plan = state.get("plan", "").lower()
+    msg_lower = last_message.lower()
     evidence = []
     
-    # Very basic routing based on the plan text
-    # In a production setup, you would use function calling (if supported by your local model)
     from app.agent.tools import metadata_tool, documentation_tool, lineage_tool, governance_tool, data_quality_tool
     
-    if "metadata" in plan or "table" in plan:
+    # Route based on keywords in the actual user message (more reliable than LLM plan)
+    if any(kw in msg_lower for kw in ["table", "schema", "view", "column", "database", "list", "show", "exist", "metadata"]) or "metadata" in plan:
         res = metadata_tool.invoke(last_message)
         evidence.append({"tool": "MetadataTool", "result": res})
     
-    if "documentation" in plan or "definition" in plan or "glossary" in plan:
+    if any(kw in msg_lower for kw in ["definition", "glossary", "document", "what is", "what does", "meaning"]) or "documentation" in plan:
         res = documentation_tool.invoke(last_message)
         evidence.append({"tool": "DocumentationTool", "result": res})
         
-    if "lineage" in plan or "upstream" in plan or "downstream" in plan:
+    if any(kw in msg_lower for kw in ["lineage", "upstream", "downstream", "depends", "pipeline", "source"]):
         res = lineage_tool.invoke(last_message)
         evidence.append({"tool": "LineageTool", "result": res})
         
-    if "governance" in plan or "owner" in plan or "policy" in plan or "tag" in plan:
+    if any(kw in msg_lower for kw in ["governance", "owner", "policy", "tag", "access", "permission", "grant"]):
         res = governance_tool.invoke(last_message)
         evidence.append({"tool": "GovernanceTool", "result": res})
         
-    if "quality" in plan or "count" in plan or "null" in plan:
-        res = data_quality_tool.invoke(last_message)
-        evidence.append({"tool": "DataQualityTool", "result": res})
+    if any(kw in msg_lower for kw in ["quality", "count", "null", "rows", "distinct", "fresh", "how many"]):
+        # Extract a clean table name from the message
+        words = last_message.replace("?", "").split()
+        table_candidate = next((w for w in reversed(words) if w[0].isupper() and len(w) > 2 and w.upper() not in ["HOW","MANY","THE","IN","OF","WHAT","ARE","ROWS"]), None)
+        if table_candidate:
+            res = data_quality_tool.invoke(table_candidate)
+            evidence.append({"tool": "DataQualityTool", "result": res})
         
-    # If plan didn't explicitly match, run metadata as default safeguard
+    # If nothing matched, run metadata as default safeguard
     if not evidence:
         res = metadata_tool.invoke(last_message)
         evidence.append({"tool": "MetadataTool (Fallback)", "result": res})
         
     return {"evidence": evidence}
+
 
 def validate_and_respond(state: AgentState):
     """Step 5: Validate evidence and generate response using Local LLaMA."""

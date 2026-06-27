@@ -11,14 +11,60 @@ def metadata_tool(object_name: str, object_type: str = "TABLE") -> str:
     """
     # Clean inputs
     obj_name_clean = object_name.upper().replace("'", "").replace(";", "")
+    msg_lower = object_name.lower()
     
-    if object_type.upper() in ("TABLE", "VIEW"):
-        query = f"""
-            SELECT TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE 
-            FROM INFORMATION_SCHEMA.TABLES 
-            WHERE TABLE_NAME ILIKE '%{obj_name_clean}%'
-            LIMIT 10
-        """
+    # Detect if user is asking about databases themselves
+    is_db_query = any(kw in msg_lower for kw in ["databases", "all database", "list database", "what database"])
+    
+    if is_db_query:
+        # List all databases in the account
+        query = "SHOW DATABASES"
+        result = SnowflakeDB.execute_query(query)
+        return json.dumps(result, default=str)
+    
+    # Keywords that indicate a generic "list all" request rather than a specific object
+    generic_keywords = ["WHAT", "LIST", "SHOW", "ALL", "EXIST", "TABLES", "VIEWS"]
+    is_generic = any(kw in obj_name_clean for kw in generic_keywords) or len(obj_name_clean) > 50
+    
+    # Detect cross-database query (e.g., "tables in SNOWFLAKE_SAMPLE_DATA")
+    # Try to extract a database name from the query
+    known_db_keywords = ["IN DATABASE", "IN DB", "IN THE"]
+    cross_db = None
+    for kw in known_db_keywords:
+        if kw.lower() in msg_lower:
+            # Extract the word after the keyword
+            parts = msg_lower.split(kw.lower())
+            if len(parts) > 1:
+                candidate = parts[1].strip().split()[0].strip("?.!").upper()
+                if len(candidate) > 1:
+                    cross_db = candidate
+                    break
+    
+    if object_type.upper() in ("TABLE", "VIEW") or is_generic:
+        if cross_db:
+            # Cross-database query - use ACCOUNT_USAGE for global visibility
+            query = f"""
+                SELECT TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE 
+                FROM SNOWFLAKE.ACCOUNT_USAGE.TABLES 
+                WHERE TABLE_CATALOG = '{cross_db}' AND DELETED IS NULL
+                ORDER BY TABLE_SCHEMA, TABLE_NAME
+                LIMIT 50
+            """
+        elif is_generic:
+            # Generic request - list all tables/views in the current database
+            query = """
+                SELECT TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE 
+                FROM INFORMATION_SCHEMA.TABLES 
+                ORDER BY TABLE_SCHEMA, TABLE_NAME
+                LIMIT 50
+            """
+        else:
+            query = f"""
+                SELECT TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE 
+                FROM INFORMATION_SCHEMA.TABLES 
+                WHERE TABLE_NAME ILIKE '%{obj_name_clean}%'
+                LIMIT 10
+            """
     elif object_type.upper() == "COLUMN":
         query = f"""
             SELECT TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE 
@@ -32,6 +78,7 @@ def metadata_tool(object_name: str, object_type: str = "TABLE") -> str:
         
     result = SnowflakeDB.execute_query(query)
     return json.dumps(result, default=str)
+
 
 @tool
 def documentation_tool(term: str) -> str:
@@ -169,6 +216,9 @@ def data_quality_tool(table_name: str, column_name: str = None) -> str:
             results["column_metrics"] = res_dq["data"][0]
 
     return json.dumps({"status": "success", "data": results}, default=str)
+
+
+
 
 @tool
 def sql_generator_tool(request: str, metadata_context: str) -> str:
