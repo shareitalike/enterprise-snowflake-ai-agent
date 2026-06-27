@@ -1,7 +1,10 @@
 from langchain_core.tools import tool
 import json
 import os
+import logging
 from app.utils.db import SnowflakeDB
+
+logger = logging.getLogger("snowflake_agent.tools")
 
 @tool
 def metadata_tool(object_name: str, object_type: str = "TABLE") -> str:
@@ -10,6 +13,7 @@ def metadata_tool(object_name: str, object_type: str = "TABLE") -> str:
     object_type can be TABLE, VIEW, COLUMN, SCHEMA, DATABASE.
     """
     # Clean inputs
+    logger.info(f"metadata_tool invoked with object_name='{object_name}', object_type='{object_type}'")
     obj_name_clean = object_name.upper().replace("'", "").replace(";", "")
     msg_lower = object_name.lower()
     
@@ -83,6 +87,7 @@ def metadata_tool(object_name: str, object_type: str = "TABLE") -> str:
 @tool
 def documentation_tool(term: str) -> str:
     """Business glossary lookup and Data dictionary fallback to COMMENTS."""
+    logger.info(f"documentation_tool invoked with term='{term}'")
     term_clean = term.replace("'", "").replace(";", "")
     
     # 1. Try Business Glossary if configured
@@ -130,6 +135,7 @@ def documentation_tool(term: str) -> str:
 @tool
 def lineage_tool(object_name: str) -> str:
     """Upstream dependency analysis and pipeline tracing."""
+    logger.info(f"lineage_tool invoked with object_name='{object_name}'")
     obj_clean = object_name.upper().replace("'", "").replace(";", "")
     
     results = {}
@@ -160,6 +166,7 @@ def lineage_tool(object_name: str) -> str:
 @tool
 def governance_tool(object_name: str) -> str:
     """Tags, Classification, Masking Policies, Row Access Policies, Grants."""
+    logger.info(f"governance_tool invoked with object_name='{object_name}'")
     obj_clean = object_name.upper().replace("'", "").replace(";", "")
     results = {}
     
@@ -186,13 +193,17 @@ def governance_tool(object_name: str) -> str:
 @tool
 def data_quality_tool(table_name: str, column_name: str = None) -> str:
     """Row counts, Null percentages, Distinct counts, Freshness metrics."""
-    tbl_clean = table_name.replace("'", "").replace(";", "")
+    logger.info(f"data_quality_tool invoked with table_name='{table_name}', column_name='{column_name}'")
+    tbl_clean = table_name.replace("'", "").replace(";", "").upper()
     
     # Very basic validation to ensure it's just a table name
     if " " in tbl_clean:
+        logger.warning(f"data_quality_tool rejected invalid table name format: '{tbl_clean}'")
         return json.dumps({"status": "error", "message": "Invalid table name format"})
 
     # Check permissions by counting first
+    # Note: Table names cannot be fully parameterized in FROM clauses in standard DB-API, 
+    # but we strictly validated there are no spaces or SQL injection characters.
     count_query = f"SELECT COUNT(*) AS total_rows FROM {tbl_clean}"
     res_count = SnowflakeDB.execute_query(count_query)
     
@@ -203,17 +214,19 @@ def data_quality_tool(table_name: str, column_name: str = None) -> str:
     
     # If specific column provided, check nulls and distincts
     if column_name:
-        col_clean = column_name.replace("'", "").replace(";", "")
-        dq_query = f"""
-            SELECT 
-                COUNT({col_clean}) AS non_null_count,
-                COUNT(DISTINCT {col_clean}) AS distinct_count,
-                (1.0 - (COUNT({col_clean}) / NULLIF(COUNT(*), 0))) * 100 AS null_percentage
-            FROM {tbl_clean}
-        """
-        res_dq = SnowflakeDB.execute_query(dq_query)
-        if res_dq.get("status") == "success":
-            results["column_metrics"] = res_dq["data"][0]
+        col_clean = column_name.replace("'", "").replace(";", "").upper()
+        # Ensure column_name has no spaces (injection prevention)
+        if " " not in col_clean:
+            dq_query = f"""
+                SELECT 
+                    COUNT({col_clean}) AS non_null_count,
+                    COUNT(DISTINCT {col_clean}) AS distinct_count,
+                    (1.0 - (COUNT({col_clean}) / NULLIF(COUNT(*), 0))) * 100 AS null_percentage
+                FROM {tbl_clean}
+            """
+            res_dq = SnowflakeDB.execute_query(dq_query)
+            if res_dq.get("status") == "success":
+                results["column_metrics"] = res_dq["data"][0]
 
     return json.dumps({"status": "success", "data": results}, default=str)
 

@@ -14,3 +14,5 @@ class AgentState(TypedDict):
     evidence: List[dict]
     validation_status: str
     final_response: str
+    session_id: str
+    tool_calls: List[dict]

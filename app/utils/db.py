@@ -7,8 +7,12 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.asymmetric import dsa
 from cryptography.hazmat.primitives import serialization
+import logging
+import time
 
 load_dotenv()
+
+logger = logging.getLogger("snowflake_agent.db")
 
 class SnowflakeDB:
     """
@@ -61,6 +65,11 @@ class SnowflakeDB:
         Executes a query and returns structured JSON results or graceful error payload.
         Ensures least-privilege compliance by trapping permission errors.
         """
+        start_time = time.time()
+        logger.info(f"Executing Snowflake query: {query[:200]}...")
+        if params:
+            logger.info(f"Query parameters: {params}")
+            
         try:
             with SnowflakeDB.get_connection() as conn:
                 with conn.cursor(snowflake.connector.DictCursor) as cur:
@@ -70,10 +79,12 @@ class SnowflakeDB:
                         cur.execute(query)
                     
                     results = cur.fetchall()
-                    # Convert to JSON serializable list
-                    # DictCursor returns rows as dicts
+                    duration = time.time() - start_time
+                    logger.info(f"Query successful. Returned {len(results)} rows in {duration:.2f}s")
                     return {"status": "success", "data": results}
         except ProgrammingError as e:
+            duration = time.time() - start_time
+            logger.warning(f"ProgrammingError during query execution in {duration:.2f}s: {e}")
             # Check for standard privilege/access errors
             if "not authorized" in str(e).lower() or "does not exist or not authorized" in str(e).lower():
                 return {
@@ -89,6 +100,7 @@ class SnowflakeDB:
                 "details": str(e)
             }
         except Exception as e:
+            logger.error(f"Unexpected error during query execution: {e}", exc_info=True)
             return {
                 "status": "error",
                 "error_type": "SystemError",

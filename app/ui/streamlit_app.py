@@ -1,5 +1,6 @@
 import streamlit as st
 import requests
+import uuid
 
 # Constants
 API_URL = "http://localhost:8000/query"
@@ -13,7 +14,10 @@ st.set_page_config(
 st.title("❄️ Enterprise Snowflake Intelligence Agent")
 st.markdown("A retrieval-first, evidence-driven AI agent for enterprise data assets.")
 
-# Initialize chat history
+# Initialize chat history and session ID
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -35,16 +39,20 @@ if prompt := st.chat_input("Ask about tables, columns, lineage, or governance...
         
         try:
             # Call the FastAPI backend
-            with st.spinner("Thinking (Routing -> Planning -> Retrieving -> Validating)..."):
-                response = requests.post(API_URL, json={"query": prompt})
+            with st.spinner("Thinking (LLM Function Calling in progress)..."):
+                payload = {
+                    "query": prompt,
+                    "session_id": st.session_state.session_id
+                }
+                response = requests.post(API_URL, json=payload)
                 response.raise_for_status()
                 data = response.json()
                 
                 full_response = data["response"]
                 
                 # Show debug info in an expander
-                with st.expander("Agent Debug Trace (LangGraph State)"):
-                    st.write(f"**Intents Detected**: {', '.join(data['intents'])}")
+                with st.expander("Agent Debug Trace (Function Calling)"):
+                    st.write(f"**Tools Called**: {', '.join(data['intents'])}")
                     st.write(f"**Execution Plan**: {data['plan']}")
 
                 message_placeholder.markdown(full_response)
